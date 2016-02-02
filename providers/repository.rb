@@ -143,16 +143,29 @@ def get_ppa_key(ppa_owner, ppa_repo, key_proxy)
   launchpad_ppa_api = "https://launchpad.net/api/#{node['apt']['launchpad_api_version']}/~%s/+archive/%s"
   default_keyserver = 'keyserver.ubuntu.com'
 
-  require 'open-uri'
+  require 'net/http'
+  require 'uri'
   api_query = format("#{launchpad_ppa_api}/signing_key_fingerprint", ppa_owner, ppa_repo)
-  begin
-    key_id = open(api_query).read.delete('"')
-  rescue OpenURI::HTTPError => e
-    error = 'Could not access launchpad ppa key api: HttpError: ' + e.message
+  
+  begin  
+    response = Net::HTTP.get_response(URI(api_query))
+  rescue Timeout::Error => e
+    error = 'Could not access launchpad ppa key api: TimeoutError: ' + e.message
     raise error
-  rescue SocketError => e
-    error = 'Could not access launchpad ppa key api: SocketError: ' + e.message
-    raise error
+  else
+    case response
+    when Net::HTTPOK
+      key_id = response.body.delete('"')   # success response
+    when Net::HTTPClientError
+      error = 'Could not access launchpad ppa key api: HTTPClientError: ' + response.code
+      raise error
+    when Net::HTTPServerError
+      error = 'Could not access launchpad ppa key api: HTTPServerError: ' + response.code
+      raise error
+    else 
+      error = 'Could not access launchpad ppa key api: Unknown HTTP Error: ' + response.code
+      raise error
+    end
   end
 
   install_key_from_keyserver(key_id, default_keyserver, key_proxy)
